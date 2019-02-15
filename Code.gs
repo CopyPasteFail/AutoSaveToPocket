@@ -5,37 +5,40 @@
 /* This script will automatically add new articles from the the subscribed blogs to Pocket */
 
 
-  // ------------------------------------------------------------------------------------------------------------------------------
-  // Set some variables
-  // ------------------------------------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------------------------------------
+// Set variables
+// ------------------------------------------------------------------------------------------------------------------------------
   
-  // Set email search criteria. Written just like a gmail search.
-  var emailQueries = [];
-  var pocast1 = '(בעיקר כלכלה‎)'
-  var pocast2 = '(המדריך לעתיד - הבלוג של ד ר רועי צזנה‎)'
-  var emailQueryString = "label:podcasts---blogs is:unread from:{‎" + pocast1 + " OR " + pocast2 + "}"
-  emailQueries.push(emailQueryString);
-  var pocketSaveToemailAddress = 'add@getpocket.com'
-  
-  // Set Google Sheets IDs for logging (comment out if not needed along with logging section below)
-  var logSpreadsheetId = '1Yw9oBp-m6duPf14LUydrKXJucVa97sywUrC4NFfoZAk'; // For logging playlist additions
-  var errSpreadsheetId = '1bVK5FoxtYvIwz0JgpNQeUU6HMHELSIH-9BGAiKJSn5s'; // For logging errors - using same doc as above but different tab
-  
-  // Get date var for logging
-  var currentTime = Utilities.formatDate(new Date(), "GMT", "yyyy-MM-dd HH:mm:ss" ) // change the timezone if you need to
-    
-  // Set regex to find the article link in email - you shouldn't need to change this.
-  var regExpString = '(href="(.*?)"..קרא עוד מהפוסט הזה)';
-  var regexp = new RegExp(regExpString);
+// Set email search criteria. Written just like a gmail search.
+var emailQueries = [];
+// The label name under the blogs mail can be found:
+var emailLabel = 'podcasts---blogs';
+// The name of the blogs as appear as sender in the email
+var blogsNameArray = ['(בעיקר כלכלה‎)', '(המדריך לעתיד - הבלוג של ד ר רועי צזנה‎)', "(מורה בפיג'מה)", "(דעת מיעוט)"];
+var emailQueryString = BuildEmailQueryString();
+emailQueries.push(emailQueryString);
+var pocketSaveToemailAddress = 'add@getpocket.com'
+
+// Set Google Sheets IDs for logging (comment out if not needed along with logging section below)
+var logSpreadsheetId = '1Yw9oBp-m6duPf14LUydrKXJucVa97sywUrC4NFfoZAk'; // For logging playlist additions
+var errSpreadsheetId = '1bVK5FoxtYvIwz0JgpNQeUU6HMHELSIH-9BGAiKJSn5s'; // For logging errors - using same doc as above but different tab
+
+// Get date var for logging
+var currentTime = Utilities.formatDate(new Date(), "GMT", "yyyy-MM-dd HH:mm:ss" ) // change the timezone if you need to
+
+// Set regex to find the article link in email - you shouldn't need to change this.
+//  var regExpString = '(href="(.*?)"..קרא עוד מהפוסט הזה)';
+var regExpString = '(להמשך קריאה..href="(.*?)")|(href="(.*?)"..קרא עוד מהפוסט הזה)';
+var regexp = new RegExp(regExpString);
 
 
 // Run this function once to grant script access and add trigger automatically.
 // Automatically adds new subscription videos from youtube to watch later list (if you have email notifications for those turned on)
-function NewPostsToPocketTrigger()
+function CreateAddNewPostsToPocketTrigger()
 {
   ScriptApp.newTrigger('AddNewPostsToPocket')
   .timeBased()
-  .everyHours(1)    // Runs script every X days/hours/min...
+  .everyHours(6)    // Runs script every X days/hours/min...
   .create();
 }
 
@@ -72,7 +75,7 @@ function AddNewPostsToPocket()
       }
     }
   }
-  Utilities.sleep(1000); // Required to avoid YT error about too many calls too close together
+//  Utilities.sleep(1000); // Required to avoid YT error about too many calls too close together
   Logger.log('#' + threads.length + ' Emails found'); // For debugging
   AppendToLogSpreadsheet(currentTime, "", "", "Found " + threads.length + " emails to parse");
 
@@ -100,9 +103,20 @@ function AddNewPostsToPocket()
         
         if (linksRegExResults != null)
         {
-          // get video ids in the message
-          for(var match = 1; match < linksRegExResults.length; match++)
+          for(var match = 0; match < linksRegExResults.length; match++)
           {
+            try
+            {
+              //convert '&amp;' to '&'
+              linksRegExResults[match] = linksRegExResults[match].replace(/amp;/g,'');
+            }
+            catch(e)
+            {
+              Logger.log('"' + linksRegExResults[match] + '" - Not a valid string, skipping to next one');
+              AppendToErrorSpreadsheet(e);
+              continue;
+            }
+
             Logger.log('linksRegExResults['+match+']: "' + linksRegExResults[match] + '"');  // For debugging
             
             try
@@ -127,19 +141,22 @@ function AddNewPostsToPocket()
             linkToSave = linksRegExResults[match];
             break;
           }
+          
+          if (linkToSave != null)
+          {
+            Logger.log('Found a valid URL - "' + linkToSave + '"');  // For debugging
+            
+            // Logging (comment out if not needed)
+            AppendToLogSpreadsheet(currentTime, from, subject, linkToSave);
+            
+            // send the link to Pocket - cost 100 units
+            MailApp.sendEmail(pocketSaveToemailAddress, "", linkToSave);
+            
+            // Marks notification email as read and archives it
+            threads[i].markRead();    // Comment line if you don't want to mark email as read in gmail after processing
+            //    threads[i].moveToArchive();    // Uncomment line if you want to archive notification emails. 
+          }
         }
-        Logger.log('Found a valid URL - "' + linkToSave + '"');  // For debugging
-      
-        // Logging (comment out if not needed)
-        AppendToLogSpreadsheet(currentTime, from, subject, linkToSave);
-
-        // cost 100 units
-        MailApp.sendEmail(pocketSaveToemailAddress, "", linkToSave);
-
-        // Marks notification email as read and archives it
-        threads[i].markRead();    // Comment line if you don't want to mark email as read in gmail after processing
-        //    threads[i].moveToArchive();    // Uncomment line if you want to archive notification emails. 
-        
       } // end of message loop
       
     } //end try
@@ -173,4 +190,16 @@ function AppendToLogSpreadsheet(currentTime, from, subject, linkToSave)
   cell.offset(lastRow, 1).setValue(from);  // 
   cell.offset(lastRow, 2).setValue(subject);  // Email subject
   cell.offset(lastRow, 3).setValue(linkToSave);  // link To Save
+}
+
+function BuildEmailQueryString()
+{
+  var emailQueryString = "label:" + emailLabel + " is:unread from:{‎";
+  var index = 0;
+  for(; index < blogsNameArray.length-1; index++)
+  {
+    emailQueryString = emailQueryString + blogsNameArray[index] + " OR ";
+  }
+  emailQueryString = emailQueryString + blogsNameArray[index] + "}";
+  return emailQueryString;
 }
